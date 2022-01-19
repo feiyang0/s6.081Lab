@@ -698,8 +698,11 @@ procdump(void)
 uint
 cnt_proc(void){
   uint free_proc=0;
-  for(struct proc *p=proc;p<&proc[NPROC];p++){
-    if(p->state != UNUSED) free_proc++;
+  for(int i=0;i<NPROC;i++){ 
+    if(proc[i].state != UNUSED) free_proc++;
   }
+  // for(struct proc *p=proc;p<&proc[NPROC];p++){
+  //   if(p->state != UNUSED) free_proc++;
+  // }
   return free_proc;
 }

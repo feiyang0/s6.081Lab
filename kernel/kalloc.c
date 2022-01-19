@@ -82,16 +82,18 @@ kalloc(void)
 }
 
 
+
 uint64 
 cnt_mem(void){
-  struct run *r;
-  acquire(&kmem.lock);
+  struct run *r;     
+  acquire(&kmem.lock);  //统计前加锁
+  //模仿前面kalloc的，为什么加锁原理还不知道😨😭
   uint64 free_mem = 0;
-  r=kmem.freelist;
-  while(r){
+  r=kmem.freelist; 
+  while(r){           //遍历空闲页表链表
     free_mem += PGSIZE;
     r=r->next;
   }
-  release(&kmem.lock);
+  release(&kmem.lock); 
   return free_mem;
 }
