@@ -6,6 +6,7 @@
 #include "memlayout.h"
 #include "spinlock.h"
 #include "proc.h"
+#include "kernel/sysinfo.h"
 
 uint64
 sys_exit(void)
@@ -94,4 +95,26 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
+}
+
+// kernel.sysproc.c
+uint64
+sys_trace(void){
+  int mask;
+  // 利用argint获取shell中输入的mask
+  if(argint(0,&mask)<0) return -1;
+  myproc()->syscall_trace=mask;
+  return 0;
+}
+
+uint64
+sys_sysinfo(void){
+  uint64 p;
+  if(argaddr(0,&p)<0) return -1;
+  struct sysinfo info;
+  info.freemem=cnt_mem();
+  info.nproc=cnt_proc();
+  if(copyout(myproc()->pagetable,p,(char*)&info,sizeof info)<0)
+    return -1;
+  return 0;
 }
