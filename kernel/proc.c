@@ -34,13 +34,15 @@ procinit(void)
       // Allocate a page for the process's kernel stack.
       // Map it high in memory, followed by an invalid
       // guard page.
-      char *pa = kalloc();
-      if(pa == 0)
-        panic("kalloc");
-      uint64 va = KSTACK((int) (p - proc));
-      kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-      p->kstack = va;
+      // 在分配进程时统一分配内核页表和内核栈
+      // char *pa = kalloc();
+      // if(pa == 0)
+      //   panic("kalloc");
+      // uint64 va = KSTACK((int) (p - proc));
+      // kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+      // p->kstack = va;
   }
+  // printf("procinit\n");
   kvminithart();
 }
 
@@ -92,6 +94,7 @@ allocpid() {
 static struct proc*
 allocproc(void)
 {
+  // printf("alloc proc\n");
   struct proc *p;
 
   for(p = proc; p < &proc[NPROC]; p++) {
@@ -120,13 +123,22 @@ found:
     release(&p->lock);
     return 0;
   }
+  // 分配内核页表
+  p->kernel_pagetable = new_kernel_pagetable();
+  // 分配内核栈 
+  char *pa = kalloc();
+  if(pa == 0)
+    panic("kalloc");
+  uint64 va = KSTACK((int)0);
+  kvmmap(p->kernel_pagetable, va,(uint64)pa,PGSIZE, PTE_R | PTE_W);
+  p->kstack=va;
 
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
-
+  // printf("alloc finish\n");
   return p;
 }
 
@@ -149,6 +161,16 @@ freeproc(struct proc *p)
   p->chan = 0;
   p->killed = 0;
   p->xstate = 0;
+  
+  // free 内核栈前，需要先把内核栈的虚拟地址转换成物理地址
+  uint64 kpa=kvmpa(p->kernel_pagetable,p->kstack);
+  kfree((void*)kpa);
+  p->kstack=0;
+
+  // 清空内核页表
+  free_kernel_pagetable(p->kernel_pagetable);
+  p->kernel_pagetable=0;
+  
   p->state = UNUSED;
 }
 
@@ -221,6 +243,8 @@ userinit(void)
   uvminit(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
 
+  user_copy_to_kernel(p->pagetable,p->kernel_pagetable,0,p->sz);
+
   // prepare for the very first "return" from kernel to user.
   p->trapframe->epc = 0;      // user program counter
   p->trapframe->sp = PGSIZE;  // user stack pointer
@@ -240,14 +264,20 @@ growproc(int n)
 {
   uint sz;
   struct proc *p = myproc();
-
   sz = p->sz;
+  uint oldsz=PGROUNDUP(p->sz);
+  uint newsz=PGROUNDUP(p->sz+n);
   if(n > 0){
     if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
+    }else {
+      if(user_copy_to_kernel(p->pagetable,p->kernel_pagetable,oldsz,newsz)<0)
+        return -1;
     }
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
+    int npages = (oldsz-newsz)/PGSIZE;
+    uvmunmap(p->kernel_pagetable,newsz,npages,0);
   }
   p->sz = sz;
   return 0;
@@ -266,9 +296,14 @@ fork(void)
   if((np = allocproc()) == 0){
     return -1;
   }
-
   // Copy user memory from parent to child.
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
+  
+  if(user_copy_to_kernel(np->pagetable, np->kernel_pagetable,0, p->sz) < 0){
     freeproc(np);
     release(&np->lock);
     return -1;
@@ -473,8 +508,15 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+
+        // 切换到内核页表
+        w_satp(MAKE_SATP(p->kernel_pagetable));
+        sfence_vma();
+        // 保存旧进程的上下文，加载新进程的上下文
         swtch(&c->context, &p->context);
 
+        // 切换成全局内核页表
+        kvminithart();
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0;
