@@ -77,8 +77,25 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
-    yield();
+  // if(which_dev == 2)
+  //   yield();
+
+  if(which_dev == 2 ){
+    if(p->interval > 0){
+      p->ticks--;   // 每个经过一个周期ticks减一
+      if(p->ticks>=0 && p->ret ==0){
+        // 当ticks减到0
+        // 并且没有调用过handler就执行handler
+        // 把pc指向handle函数
+        // 并且保存好当前中断状态，设置ret为1
+        p->ticks = p->interval;
+        *p->alarm_trapframe = *p->trapframe;
+        p->ret=1;
+        p->trapframe->epc = (uint64)p->handler;
+      }
+    }
+    yield();   //让出一个时钟周期
+  }
 
   usertrapret();
 }
@@ -218,3 +235,18 @@ devintr()
   }
 }
 
+
+int sigalarm(int ticks, void (*handler)()){
+  struct proc *p = myproc();
+  p->ticks = ticks;
+  p->handler = handler;
+  p->interval = ticks;
+  return 0;
+}
+
+int sigreturn(void){
+  struct proc *p = myproc();
+  p->ret = 0;
+  *p->trapframe = *p->alarm_trapframe;
+  return 0;
+}

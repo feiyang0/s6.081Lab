@@ -132,3 +132,18 @@ printfinit(void)
   initlock(&pr.lock, "pr");
   pr.locking = 1;
 }
+
+void 
+backtrace(void){
+  printf("backtrace:\n");
+  uint64 s0=r_fp();
+  // bt为栈开始的地方，
+  // bt-8存放返回地址，
+  // bt-16存放上个栈的bt
+  // 第一个函数栈的起始地址为页起始地址
+  while(s0!=PGROUNDUP(s0)){
+    uint64 ra=*(uint64*)(s0-8);
+    printf("%p\n",ra);
+    s0=*(uint64*)(s0-16);
+  }
+}
