@@ -42,13 +42,19 @@ uint64
 sys_sbrk(void)
 {
   int addr;
-  int n;
-
+  int n,sz;
+  struct proc *p = myproc();
+  sz=p->sz;
   if(argint(0, &n) < 0)
     return -1;
   addr = myproc()->sz;
-  if(growproc(n) < 0)
-    return -1;
+  // if(growproc(n) < 0)
+  //   return -1;
+  // 需要缩小内存时，实时缩小
+  if(n<0)
+    uvmdealloc(p->pagetable, sz, sz + n);
+  // 修改sz大小
+  p->sz += n;
   return addr;
 }
 
