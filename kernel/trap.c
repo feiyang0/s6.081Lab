@@ -29,6 +29,32 @@ trapinithart(void)
   w_stvec((uint64)kernelvec);
 }
 
+
+int handler(pagetable_t pgtbl,uint64 va){
+  if(va>MAXVA) return -1;
+  char* mem;      
+  pte_t *pte;
+   // 得到共享内存的pte
+  if((pte = walk(pgtbl,va,0))==0) return -1;
+  uint64 pa;
+  if((*pte&PTE_RSW)==0) return -1; // 只对cow的情况处理
+  pa = PTE2PA(*pte);          //得到共享内存的pa
+  //修改父进程物理页权限，恢复成正常的内存页：
+  // 加上可读，去掉cow标记，让子进程的物理页有相同的权限
+  uint64 flag = (PTE_FLAGS(*pte)|PTE_W)&(~PTE_RSW);
+  if((mem = kalloc()) == 0) return -1;// 为新进程分配内存空间
+  memmove(mem, (char*)pa, PGSIZE);    // 复制父进程内容
+  //去掉原有的映射关系
+  // 这里最后一个参数为1表示释放对应的内存，
+  // 我们在kfree的地方减少引用次数
+  uvmunmap(pgtbl,PGROUNDDOWN(va),1,1);
+  //将子进程va映射到刚刚分配的内存
+  if(mappages(pgtbl,va,PGSIZE,(uint64)mem,flag)<0){  
+    uvmunmap(pgtbl,PGROUNDDOWN(va),1,1); //映射失败，解除映射，减少引用次数
+    return -1;
+  }
+  return 0;
+}
 //
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
@@ -67,7 +93,14 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  } else if(r_scause()==15){ // cow为因为写引起的用户中断，对应值15
+    uint64 va=r_stval(); // 获取中断地址
+    // 边界检查
+    if(va>MAXVA) p->killed=1; 
+    // 调用中断处理函数
+    if(handler(p->pagetable,PGROUNDDOWN(va))<0)
+      p->killed = 1;
+  }else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;

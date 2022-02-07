@@ -23,6 +23,19 @@ struct {
   struct run *freelist;
 } kmem;
 
+uint64 qcnt[(PHYSTOP-KERNBASE)/PGSIZE];
+
+uint64 getinx(uint64 pa){
+  return (pa-KERNBASE)/PGSIZE;
+}
+void add_qcnt(uint64 pa){
+  qcnt[getinx(pa)]++;
+}
+void sub_qcnt(uint64 pa){
+  int idx=getinx(pa);
+  if(qcnt[idx]>0)
+    qcnt[idx]--;
+}
 void
 kinit()
 {
@@ -51,6 +64,8 @@ kfree(void *pa)
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
+  sub_qcnt((uint64)pa);
+  if(qcnt[getinx((uint64)pa)]!=0) return;
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 
@@ -72,8 +87,11 @@ kalloc(void)
 
   acquire(&kmem.lock);
   r = kmem.freelist;
-  if(r)
+  if(r){
     kmem.freelist = r->next;
+    qcnt[getinx((uint64)r)]=1;
+  }
+    
   release(&kmem.lock);
 
   if(r)
