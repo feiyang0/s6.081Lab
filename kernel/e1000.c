@@ -103,6 +103,34 @@ e1000_transmit(struct mbuf *m)
   // a pointer so that it can be freed after sending.
   //
   
+  acquire(&e1000_lock);
+
+  // E1000_TDT指向当前可用txtx_ring的下标tx
+  uint32 idx = regs[E1000_TDT];  
+  // tx_ring存放记录buf信息的tx_desc
+  struct tx_desc *tx_d = &tx_ring[idx];
+  // 还没发送完
+  if( !(tx_d->status & E1000_RXD_STAT_DD)){
+    release(&e1000_lock);
+    return -1;
+  }
+  
+  // tx_desc记录数据包信息，并指向数据包
+  tx_d->addr = (uint64)m->head;
+  tx_d->length = m->len;
+  tx_d->cmd = E1000_TXD_CMD_EOP | E1000_TXD_CMD_RS;
+
+  // tx_mbufs 保存要发送的数据包,保存前先清空原来内容
+  if(tx_mbufs[idx]){
+      mbuffree(tx_mbufs[idx]);
+      tx_mbufs[idx]=0;
+  }
+  tx_mbufs[idx]=m;
+
+  // 缓存队列释放循环队列尾指针加一
+  regs[E1000_TDT] = (regs[E1000_TDT]+1)%TX_RING_SIZE;
+
+  release(&e1000_lock);
   return 0;
 }
 
@@ -115,6 +143,28 @@ e1000_recv(void)
   // Check for packets that have arrived from the e1000
   // Create and deliver an mbuf for each packet (using net_rx()).
   //
+  
+  while(1){
+    // 把packet存放到提前分配好的mbufs
+    uint32 idx = (regs[E1000_RDT]+1)%RX_RING_SIZE;
+    struct rx_desc *rx_d = &rx_ring[idx];
+
+    // 没有包需要接收
+    if(!(rx_d->status & E1000_RXD_STAT_DD)){
+      return ;
+    }
+    rx_mbufs[idx]->len = rx_d->length;
+    
+    // 把 mbuf传送到网络堆栈
+    net_rx(rx_mbufs[idx]);
+
+    // 为下个packet接收提前分配好mbuf   
+    rx_mbufs[idx] = mbufalloc(0);
+    rx_d->addr = (uint64)rx_mbufs[idx]->head;
+    rx_d->status = 0;
+    regs[E1000_RDT]=idx;
+  }
+
 }
 
 void
