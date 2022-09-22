@@ -180,3 +180,37 @@ filewrite(struct file *f, uint64 addr, int n)
   return ret;
 }
 
+void
+file_copytovm(uint64 va,struct vma *v){
+  ilock(v->f->ip);
+  readi(v->f->ip,1,va,v->offset+(va-v->addr),PGSIZE);
+  iunlock(v->f->ip);
+}
+
+
+
+int 
+write_back_to_file(struct file *f,uint64 addr,int n,uint64 off){
+  int r = 0;
+
+  if(f->writable == 0) return -1;
+
+    int max = ((MAXOPBLOCKS-1-1-2) / 2) * BSIZE;
+    int i = 0;
+    while(i < n){
+      int n1 = n - i;
+      if(n1 > max)
+        n1 = max;
+      begin_op();
+      ilock(f->ip);
+      if ((r = writei(f->ip, 1, addr + i, off, n1)) > 0)
+        off += r;
+      iunlock(f->ip);
+      end_op();
+
+      if(r != n1) break;
+  
+      i += r;
+    }
+  return 0;
+}

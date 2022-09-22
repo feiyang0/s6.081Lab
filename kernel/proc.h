@@ -80,6 +80,13 @@ struct trapframe {
   /* 280 */ uint64 t6;
 };
 
+struct vma{
+  int used;        // 是否使用
+  uint64 addr,len; //分配vm所在空间[addr,addr+len]
+  int prot,flags;  // 文件权限和分配地址权限
+  struct file *f;  // 指向文件
+  uint64 offset;   // 用来标记当前文件从哪开始读/写
+};
 enum procstate { UNUSED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
 // Per-process state
@@ -103,4 +110,5 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  struct vma vmas[NVMA];
 };

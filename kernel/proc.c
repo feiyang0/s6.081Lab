@@ -134,6 +134,9 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  for(int i=0;i<NVMA;i++){
+    p->vmas[i].used=0;
+  }
   return p;
 }
 
@@ -300,6 +303,14 @@ fork(void)
 
   pid = np->pid;
 
+  for(int i=0;i<NVMA;i++){
+    struct vma *v = &p->vmas[i];
+    struct vma *nv = &np->vmas[i];
+    if(v->used){
+      memmove(nv,v,sizeof(struct vma));
+      filedup(v->f);
+    } 
+  }
   np->state = RUNNABLE;
 
   release(&np->lock);
@@ -353,6 +364,13 @@ exit(int status)
     }
   }
 
+  for(int i=0;i<NVMA;i++){
+    struct vma *v = &p->vmas[i];
+    if(v->used){
+      uvmunmap(p->pagetable,v->addr,v->len/PGSIZE,0);
+      memset(v,0,sizeof(struct vma));
+    }
+  }
   begin_op();
   iput(p->cwd);
   end_op();

@@ -484,3 +484,74 @@ sys_pipe(void)
   }
   return 0;
 }
+
+uint64
+sys_mmap(void){
+  
+  uint64 len;
+  struct file *f;
+  int prot,flags,fd;
+  // 实验中设置的addr和offset都为0
+  if( argaddr(1,&len)<0 ||argint(2,&prot)<0 || 
+      argint(3,&flags)<0 ||argfd(4,&fd,&f)<0  )
+    return -1;
+  
+  // 文件不可写，但是映射成可写或者共享（也是可写）
+  if(!f->writable && (prot&PROT_WRITE) && (flags&MAP_SHARED))
+    return -1;
+  // 分配一个为使用的vma记录映射信息
+  struct proc *p = myproc();
+  for(int i=0;i<NVMA; i++){
+    struct vma *v = &p->vmas[i];
+    if(v->used==0){
+      v->used=1;
+      // 采用懒分配机制，
+      // 只分配vm等page fault再分配实际内存
+      v->addr = p->sz;
+      len = PGROUNDUP(len); //进程按page为单位分配
+      p->sz+=len; 
+      // 记录其他变量
+      v->len = len,v->prot=prot;
+      v->flags=flags,v->offset=0;
+      v->f = filedup(f);
+      return v->addr;
+    }
+  }
+  return -1;
+}
+
+
+uint64
+sys_munmap(void){
+  uint64 addr,len;
+  if(argaddr(0,&addr)<0||argaddr(1,&len)<0) 
+    return -1;
+  struct proc *p = myproc();
+  for(int i=0;i<NVMA;i++){
+    struct vma *v = &p->vmas[i];
+    if(v->used && addr>=v->addr && addr <=v->addr+v->len){
+      // 把映射内容写回文件
+      if(v->flags&MAP_SHARED) 
+        write_back_to_file(v->f,addr,PGROUNDDOWN(len),v->offset);
+
+      if(addr==v->addr){  //只有头部对齐的时候才释放
+        if(len>=v->len){ //全部释放
+          len = v->len;
+          v->used=0;
+        }else{
+          v->addr+=len;   // 更新起点位置
+          v->offset+=len;  // 更新文件开始读写的位置
+        }
+      }
+      len=PGROUNDDOWN(len);
+      v->len-=len;   
+      // 释放进程内存，并解除映射
+      p->sz-=len;    
+      uvmunmap(p->pagetable,PGROUNDDOWN(addr),len/PGSIZE,1);
+      // 如果全是mmap的映射全部释放，减少对文件的引用
+      if(!v->used) fileclose(v->f);
+      return 0;
+    }
+  }
+  return -1;
+}
